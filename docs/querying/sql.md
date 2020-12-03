@@ -167,9 +167,9 @@ together and appear one after the other.
 
 #### Table-level
 
-UNION ALL can be used to query multiple tables at the same time. In this case, it must appear in the FROM clause,
-and the subqueries that are inputs to the UNION ALL operator must be simple table SELECTs (no expressions, column
-aliasing, etc). The query will run natively using a [union datasource](datasource.md#union).
+UNION ALL can be used to query multiple tables at the same time. In this case, it must appear in a subquery in the
+FROM clause, and the lower-level subqueries that are inputs to the UNION ALL operator must be simple table SELECTs
+(no expressions, column aliasing, etc). The query will run natively using a [union datasource](datasource.md#union).
 
 The same columns must be selected from each table in the same order, and those columns must either have the same types,
 or types that can be implicitly cast to each other (such as different numeric types). For this reason, it is generally
@@ -190,7 +190,7 @@ GROUP BY col1
 
 When UNION ALL occurs at the table level, the rows from the unioned tables are not guaranteed to be processed in
 any particular order. They may be processed in an interleaved fashion. If you need a particular result ordering,
-use [ORDER BY](#order-by).
+use [ORDER BY](#order-by) on the outer query.
 
 ### EXPLAIN PLAN
 
@@ -1083,9 +1083,10 @@ Segments table provides details on all Druid segments, whether they are publishe
 |is_available|LONG|Boolean is represented as long type where 1 = true, 0 = false. 1 if this segment is currently being served by any process(Historical or realtime). See the [Architecture page](../design/architecture.md#segment-lifecycle) for more details.|
 |is_realtime|LONG|Boolean is represented as long type where 1 = true, 0 = false. 1 if this segment is _only_ served by realtime tasks, and 0 if any historical process is serving this segment.|
 |is_overshadowed|LONG|Boolean is represented as long type where 1 = true, 0 = false. 1 if this segment is published and is _fully_ overshadowed by some other published segments. Currently, is_overshadowed is always false for unpublished segments, although this may change in the future. You can filter for segments that "should be published" by filtering for `is_published = 1 AND is_overshadowed = 0`. Segments can briefly be both published and overshadowed if they were recently replaced, but have not been unpublished yet. See the [Architecture page](../design/architecture.md#segment-lifecycle) for more details.|
-|shardSpec|STRING|The toString of specific `ShardSpec`|
-|dimensions|STRING|The dimensions of the segment|
-|metrics|STRING|The metrics of the segment|
+|shard_spec|STRING|JSON-serialized form of the segment `ShardSpec`|
+|dimensions|STRING|JSON-serialized form of the segment dimensions|
+|metrics|STRING|JSON-serialized form of the segment metrics|
+|last_compaction_state|STRING|JSON-serialized form of the compaction task's config (compaction task which created this segment). May be null if segment was not created by compaction task.|
 
 For example to retrieve all segments for datasource "wikipedia", use the query:
 
@@ -1105,6 +1106,18 @@ SELECT
 FROM sys.segments
 GROUP BY 1
 ORDER BY 2 DESC
+```
+
+If you want to retrieve segment that was compacted (ANY compaction):
+
+```sql
+SELECT * FROM sys.segments WHERE last_compaction_state is not null
+```
+
+or if you want to retrieve segment that was compacted only by a particular compaction spec (such as that of the auto compaction):
+
+```sql
+SELECT * FROM sys.segments WHERE last_compaction_state == 'SELECT * FROM sys.segments where last_compaction_state = 'CompactionState{partitionsSpec=DynamicPartitionsSpec{maxRowsPerSegment=5000000, maxTotalRows=9223372036854775807}, indexSpec={bitmap={type=roaring, compressRunOnSerialization=true}, dimensionCompression=lz4, metricCompression=lz4, longEncoding=longs, segmentLoader=null}}'
 ```
 
 *Caveat:* Note that a segment can be served by more than one stream ingestion tasks or Historical processes, in that case it would have multiple replicas. These replicas are weakly consistent with each other when served by multiple ingestion tasks, until a segment is eventually served by a Historical, at that point the segment is immutable. Broker prefers to query a segment from Historical over an ingestion task. But if a segment has multiple realtime replicas, for e.g.. Kafka index tasks, and one task is slower than other, then the sys.segments query results can vary for the duration of the tasks because only one of the ingestion tasks is queried by the Broker and it is not guaranteed that the same task gets picked every time. The `num_rows` column of segments table can have inconsistent values during this period. There is an open [issue](https://github.com/apache/druid/issues/5915) about this inconsistency with stream ingestion tasks.
@@ -1208,5 +1221,5 @@ Druid SQL planning occurs on the Broker and is configured by
 
 ## Security
 
-Please see [Defining SQL permissions](../development/extensions-core/druid-basic-security.html#sql-permissions) in the
+Please see [Defining SQL permissions](../operations/security-user-auth.md#sql-permissions) in the
 basic security documentation for information on what permissions are needed for making SQL queries.

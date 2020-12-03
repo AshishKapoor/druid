@@ -19,98 +19,33 @@
 import { Button, Classes, Dialog, Intent } from '@blueprintjs/core';
 import React, { useState } from 'react';
 
-import { AutoForm, ExternalLink, Field } from '../../components';
-import { getLink } from '../../links';
+import { AutoForm, FormJsonSelector, FormJsonTabs, JsonInput } from '../../components';
+import { COMPACTION_CONFIG_FIELDS, CompactionConfig } from '../../druid-models';
 
 import './compaction-dialog.scss';
 
-export const DEFAULT_MAX_ROWS_PER_SEGMENT = 5000000;
-
-const COMPACTION_CONFIG_FIELDS: Field<Record<string, any>>[] = [
-  {
-    name: 'inputSegmentSizeBytes',
-    type: 'number',
-    defaultValue: 419430400,
-    info: (
-      <p>
-        Maximum number of total segment bytes processed per compaction task. Since a time chunk must
-        be processed in its entirety, if the segments for a particular time chunk have a total size
-        in bytes greater than this parameter, compaction will not run for that time chunk. Because
-        each compaction task runs with a single thread, setting this value too far above 1–2GB will
-        result in compaction tasks taking an excessive amount of time.
-      </p>
-    ),
-  },
-  {
-    name: 'skipOffsetFromLatest',
-    type: 'string',
-    defaultValue: 'P1D',
-    info: (
-      <p>
-        The offset for searching segments to be compacted. Strongly recommended to set for realtime
-        dataSources.
-      </p>
-    ),
-  },
-  {
-    name: 'maxRowsPerSegment',
-    type: 'number',
-    defaultValue: DEFAULT_MAX_ROWS_PER_SEGMENT,
-    info: <p>Determines how many rows are in each segment.</p>,
-  },
-  {
-    name: 'taskContext',
-    type: 'json',
-    info: (
-      <p>
-        <ExternalLink href={`${getLink('DOCS')}/ingestion/tasks.html#task-context`}>
-          Task context
-        </ExternalLink>{' '}
-        for compaction tasks.
-      </p>
-    ),
-  },
-  {
-    name: 'taskPriority',
-    type: 'number',
-    defaultValue: 25,
-    info: <p>Priority of the compaction task.</p>,
-  },
-  {
-    name: 'tuningConfig',
-    type: 'json',
-    info: (
-      <p>
-        <ExternalLink
-          href={`${getLink('DOCS')}/configuration/index.html#compact-task-tuningconfig`}
-        >
-          Tuning config
-        </ExternalLink>{' '}
-        for compaction tasks.
-      </p>
-    ),
-  },
-];
-
 export interface CompactionDialogProps {
   onClose: () => void;
-  onSave: (config: Record<string, any>) => void;
+  onSave: (compactionConfig: CompactionConfig) => void;
   onDelete: () => void;
   datasource: string;
-  compactionConfig?: Record<string, any>;
+  compactionConfig: CompactionConfig | undefined;
 }
 
 export const CompactionDialog = React.memo(function CompactionDialog(props: CompactionDialogProps) {
   const { datasource, compactionConfig, onSave, onClose, onDelete } = props;
 
-  const [currentConfig, setCurrentConfig] = useState<Record<string, any>>(
+  const [currentTab, setCurrentTab] = useState<FormJsonTabs>('form');
+  const [currentConfig, setCurrentConfig] = useState<CompactionConfig>(
     compactionConfig || {
       dataSource: datasource,
+      tuningConfig: { partitionsSpec: { type: 'dynamic' } },
     },
   );
 
+  const issueWithCurrentConfig = AutoForm.issueWithModel(currentConfig, COMPACTION_CONFIG_FIELDS);
   function handleSubmit() {
-    if (!currentConfig) return;
+    if (issueWithCurrentConfig) return;
     onSave(currentConfig);
   }
 
@@ -122,25 +57,32 @@ export const CompactionDialog = React.memo(function CompactionDialog(props: Comp
       canOutsideClickClose={false}
       title={`Compaction config: ${datasource}`}
     >
-      <AutoForm
-        fields={COMPACTION_CONFIG_FIELDS}
-        model={currentConfig}
-        onChange={m => setCurrentConfig(m)}
-      />
+      <FormJsonSelector tab={currentTab} onChange={setCurrentTab} />
+      <div className="content">
+        {currentTab === 'form' ? (
+          <AutoForm
+            fields={COMPACTION_CONFIG_FIELDS}
+            model={currentConfig}
+            onChange={m => setCurrentConfig(m)}
+          />
+        ) : (
+          <JsonInput
+            value={currentConfig}
+            onChange={setCurrentConfig}
+            issueWithValue={value => AutoForm.issueWithModel(value, COMPACTION_CONFIG_FIELDS)}
+            height="100%"
+          />
+        )}
+      </div>
       <div className={Classes.DIALOG_FOOTER}>
         <div className={Classes.DIALOG_FOOTER_ACTIONS}>
-          <Button
-            text="Delete"
-            intent={Intent.DANGER}
-            onClick={onDelete}
-            disabled={!compactionConfig}
-          />
+          {compactionConfig && <Button text="Delete" intent={Intent.DANGER} onClick={onDelete} />}
           <Button text="Close" onClick={onClose} />
           <Button
             text="Submit"
             intent={Intent.PRIMARY}
             onClick={handleSubmit}
-            disabled={!currentConfig}
+            disabled={Boolean(issueWithCurrentConfig)}
           />
         </div>
       </div>

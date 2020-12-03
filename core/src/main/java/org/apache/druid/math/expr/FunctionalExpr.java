@@ -22,6 +22,7 @@ package org.apache.druid.math.expr;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import org.apache.druid.java.util.common.StringUtils;
+import org.apache.druid.math.expr.vector.ExprVectorProcessor;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -77,6 +78,18 @@ class LambdaExpr implements Expr
   }
 
   @Override
+  public boolean canVectorize(InputBindingInspector inspector)
+  {
+    return expr.canVectorize(inspector);
+  }
+
+  @Override
+  public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    return expr.buildVectorized(inspector);
+  }
+
+  @Override
   public ExprEval eval(ObjectBinding bindings)
   {
     return expr.eval(bindings);
@@ -86,13 +99,6 @@ class LambdaExpr implements Expr
   public String stringify()
   {
     return StringUtils.format("(%s) -> %s", ARG_JOINER.join(getIdentifiers()), expr.stringify());
-  }
-
-  @Override
-  public void visit(Visitor visitor)
-  {
-    expr.visit(visitor);
-    visitor.visit(this);
   }
 
   @Override
@@ -113,9 +119,9 @@ class LambdaExpr implements Expr
   }
 
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    return expr.getOutputType(inputTypes);
+    return expr.getOutputType(inspector);
   }
 
   @Override
@@ -171,18 +177,21 @@ class FunctionExpr implements Expr
   }
 
   @Override
-  public String stringify()
+  public boolean canVectorize(InputBindingInspector inspector)
   {
-    return StringUtils.format("%s(%s)", name, ARG_JOINER.join(args.stream().map(Expr::stringify).iterator()));
+    return function.canVectorize(inspector, args);
   }
 
   @Override
-  public void visit(Visitor visitor)
+  public ExprVectorProcessor<?> buildVectorized(VectorInputBindingInspector inspector)
   {
-    for (Expr child : args) {
-      child.visit(visitor);
-    }
-    visitor.visit(this);
+    return function.asVectorProcessor(inspector, args);
+  }
+
+  @Override
+  public String stringify()
+  {
+    return StringUtils.format("%s(%s)", name, ARG_JOINER.join(args.stream().map(Expr::stringify).iterator()));
   }
 
   @Override
@@ -207,9 +216,9 @@ class FunctionExpr implements Expr
   }
 
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    return function.getOutputType(inputTypes, args);
+    return function.getOutputType(inspector, args);
   }
 
   @Override
@@ -289,6 +298,20 @@ class ApplyFunctionExpr implements Expr
   }
 
   @Override
+  public boolean canVectorize(InputBindingInspector inspector)
+  {
+    return function.canVectorize(inspector, lambdaExpr, argsExpr) &&
+           lambdaExpr.canVectorize(inspector) &&
+           argsExpr.stream().allMatch(expr -> expr.canVectorize(inspector));
+  }
+
+  @Override
+  public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    return function.asVectorProcessor(inspector, lambdaExpr, argsExpr);
+  }
+
+  @Override
   public String stringify()
   {
     return StringUtils.format(
@@ -297,16 +320,6 @@ class ApplyFunctionExpr implements Expr
         lambdaExpr.stringify(),
         ARG_JOINER.join(argsExpr.stream().map(Expr::stringify).iterator())
     );
-  }
-
-  @Override
-  public void visit(Visitor visitor)
-  {
-    lambdaExpr.visit(visitor);
-    for (Expr arg : argsExpr) {
-      arg.visit(visitor);
-    }
-    visitor.visit(this);
   }
 
   @Override
@@ -325,9 +338,9 @@ class ApplyFunctionExpr implements Expr
 
   @Nullable
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    return function.getOutputType(inputTypes, lambdaExpr, argsExpr);
+    return function.getOutputType(inspector, lambdaExpr, argsExpr);
   }
 
   @Override

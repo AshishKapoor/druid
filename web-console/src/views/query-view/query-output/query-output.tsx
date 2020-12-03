@@ -29,10 +29,12 @@ import {
 import React, { useState } from 'react';
 import ReactTable from 'react-table';
 
-import { TableCell } from '../../../components';
+import { BracedText, TableCell } from '../../../components';
 import { ShowValueDialog } from '../../../dialogs/show-value-dialog/show-value-dialog';
-import { copyAndAlert, prettyPrintSql } from '../../../utils';
+import { copyAndAlert, deepSet, filterMap, prettyPrintSql } from '../../../utils';
 import { BasicAction, basicActionsToMenu } from '../../../utils/basic-action';
+
+import { ColumnRenameInput } from './column-rename-input/column-rename-input';
 
 import './query-output.scss';
 
@@ -52,6 +54,34 @@ function stringifyValue(value: unknown): string {
   }
 }
 
+interface Pagination {
+  page: number;
+  pageSize: number;
+}
+
+function getNumericColumnBraces(
+  queryResult: QueryResult | undefined,
+  pagination: Pagination,
+): Record<number, string[]> {
+  const numericColumnBraces: Record<number, string[]> = {};
+  if (queryResult) {
+    const index = pagination.page * pagination.pageSize;
+    const rows = queryResult.rows.slice(index, index + pagination.pageSize);
+    if (rows.length) {
+      const numColumns = queryResult.header.length;
+      for (let c = 0; c < numColumns; c++) {
+        const brace = filterMap(rows, row =>
+          typeof row[c] === 'number' ? String(row[c]) : undefined,
+        );
+        if (rows.length === brace.length) {
+          numericColumnBraces[c] = brace;
+        }
+      }
+    }
+  }
+  return numericColumnBraces;
+}
+
 export interface QueryOutputProps {
   queryResult?: QueryResult;
   onQueryChange: (query: SqlQuery, run?: boolean) => void;
@@ -59,9 +89,11 @@ export interface QueryOutputProps {
 }
 
 export const QueryOutput = React.memo(function QueryOutput(props: QueryOutputProps) {
-  const { queryResult } = props;
+  const { queryResult, onQueryChange, runeMode } = props;
   const parsedQuery = queryResult ? queryResult.sqlQuery : undefined;
-  const [showValue, setShowValue] = useState();
+  const [pagination, setPagination] = useState<Pagination>({ page: 0, pageSize: 20 });
+  const [showValue, setShowValue] = useState<string>();
+  const [renamingColumn, setRenamingColumn] = useState<number>(-1);
 
   function hasFilterOnHeader(header: string, headerIndex: number): boolean {
     if (!parsedQuery || !parsedQuery.isRealOutputColumnAtSelectIndex(headerIndex)) return false;
@@ -73,7 +105,6 @@ export const QueryOutput = React.memo(function QueryOutput(props: QueryOutputPro
   }
 
   function getHeaderMenu(header: string, headerIndex: number) {
-    const { onQueryChange, runeMode } = props;
     const ref = SqlRef.column(header);
     const prettyRef = prettyPrintSql(ref);
 
@@ -143,6 +174,16 @@ export const QueryOutput = React.memo(function QueryOutput(props: QueryOutputPro
             },
           });
         }
+      }
+
+      if (!parsedQuery.hasStarInSelect()) {
+        basicActions.push({
+          icon: IconNames.EDIT,
+          title: `Rename column`,
+          onAction: () => {
+            setRenamingColumn(headerIndex);
+          },
+        });
       }
 
       basicActions.push({
@@ -291,7 +332,7 @@ export const QueryOutput = React.memo(function QueryOutput(props: QueryOutputPro
     }
   }
 
-  function getHeaderClassName(header: string) {
+  function getHeaderClassName(header: string, i: number) {
     if (!parsedQuery) return;
 
     const className = [];
@@ -304,36 +345,76 @@ export const QueryOutput = React.memo(function QueryOutput(props: QueryOutputPro
       className.push('aggregate-header');
     }
 
+    if (i === renamingColumn) {
+      className.push('renaming');
+    }
+
     return className.join(' ');
   }
 
+  function renameColumnTo(renameTo: string | undefined) {
+    setRenamingColumn(-1);
+    if (renameTo && parsedQuery) {
+      if (parsedQuery.hasStarInSelect()) return;
+      const selectExpression = parsedQuery.selectExpressions.get(renamingColumn);
+      if (!selectExpression) return;
+      onQueryChange(
+        parsedQuery.changeSelectExpressions(
+          parsedQuery.selectExpressions.change(
+            renamingColumn,
+            selectExpression.changeAliasName(renameTo),
+          ),
+        ),
+        true,
+      );
+    }
+  }
+
+  const numericColumnBraces = getNumericColumnBraces(queryResult, pagination);
   return (
     <div className="query-output">
       <ReactTable
         data={queryResult ? (queryResult.rows as any[][]) : []}
         noDataText={queryResult && !queryResult.rows.length ? 'Query returned no data' : ''}
+        page={pagination.page}
+        pageSize={pagination.pageSize}
+        onPageChange={page => setPagination(deepSet(pagination, 'page', page))}
+        onPageSizeChange={(pageSize, page) => setPagination({ page, pageSize })}
         sortable={false}
         columns={(queryResult ? queryResult.header : []).map((column, i) => {
           const h = column.name;
           return {
-            Header: () => {
-              return (
-                <Popover className={'clickable-cell'} content={getHeaderMenu(h, i)}>
-                  <div>
-                    {h}
-                    {hasFilterOnHeader(h, i) && <Icon icon={IconNames.FILTER} iconSize={14} />}
-                  </div>
-                </Popover>
-              );
-            },
-            headerClassName: getHeaderClassName(h),
+            Header:
+              i === renamingColumn && parsedQuery
+                ? () => <ColumnRenameInput initialName={h} onDone={renameColumnTo} />
+                : () => {
+                    return (
+                      <Popover className={'clickable-cell'} content={getHeaderMenu(h, i)}>
+                        <div>
+                          {h}
+                          {hasFilterOnHeader(h, i) && (
+                            <Icon icon={IconNames.FILTER} iconSize={14} />
+                          )}
+                        </div>
+                      </Popover>
+                    );
+                  },
+            headerClassName: getHeaderClassName(h, i),
             accessor: String(i),
             Cell: row => {
               const value = row.value;
               return (
                 <div>
                   <Popover content={getCellMenu(h, i, value)}>
-                    <TableCell value={value} unlimited />
+                    {numericColumnBraces[i] ? (
+                      <BracedText
+                        text={String(value)}
+                        braces={numericColumnBraces[i]}
+                        padFractionalPart
+                      />
+                    ) : (
+                      <TableCell value={value} unlimited />
+                    )}
                   </Popover>
                 </div>
               );

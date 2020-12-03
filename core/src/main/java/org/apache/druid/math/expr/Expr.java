@@ -24,9 +24,11 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import org.apache.druid.annotations.SubclassesMustOverrideEqualsAndHashCode;
 import org.apache.druid.java.util.common.ISE;
+import org.apache.druid.math.expr.vector.ExprVectorProcessor;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -40,6 +42,7 @@ public interface Expr
 {
   String NULL_LITERAL = "null";
   Joiner ARG_JOINER = Joiner.on(", ");
+
   /**
    * Indicates expression is a constant whose literal value can be extracted by {@link Expr#getLiteralValue()},
    * making evaluating with arguments and bindings unecessary
@@ -47,6 +50,12 @@ public interface Expr
   default boolean isLiteral()
   {
     // Overridden by things that are literals.
+    return false;
+  }
+
+  default boolean isNullLiteral()
+  {
+    // Overridden by things that are null literals.
     return false;
   }
 
@@ -110,17 +119,12 @@ public interface Expr
   String stringify();
 
   /**
-   * Programmatically inspect the {@link Expr} tree with a {@link Visitor}. Each {@link Expr} is responsible for
-   * ensuring the {@link Visitor} can visit all of its {@link Expr} children before visiting itself
-   */
-  void visit(Visitor visitor);
-
-  /**
    * Programatically rewrite the {@link Expr} tree with a {@link Shuttle}. Each {@link Expr} is responsible for
    * ensuring the {@link Shuttle} can visit all of its {@link Expr} children, as well as updating its children
    * {@link Expr} with the results from the {@link Shuttle}, before finally visiting an updated form of itself.
    */
   Expr visit(Shuttle shuttle);
+
 
   /**
    * Examine the usage of {@link IdentifierExpr} children of an {@link Expr}, constructing a {@link BindingAnalysis}
@@ -128,15 +132,37 @@ public interface Expr
   BindingAnalysis analyzeInputs();
 
   /**
-   * Given an {@link InputBindingTypes}, compute what the output {@link ExprType} will be for this expression. A return
+   * Given an {@link InputBindingInspector}, compute what the output {@link ExprType} will be for this expression. A return
    * value of null indicates that the given type information was not enough to resolve the output type, so the
    * expression must be evaluated using default {@link #eval} handling where types are only known after evaluation,
    * through {@link ExprEval#type}.
+   * @param inspector
    */
   @Nullable
-  default ExprType getOutputType(InputBindingTypes inputTypes)
+  default ExprType getOutputType(InputBindingInspector inspector)
   {
     return null;
+  }
+
+  /**
+   * Check if an expression can be 'vectorized', for a given set of inputs. If this method returns true,
+   * {@link #buildVectorized} is expected to produce a {@link ExprVectorProcessor} which can evaluate values in batches
+   * to use with vectorized query engines.
+   * @param inspector
+   */
+  default boolean canVectorize(InputBindingInspector inspector)
+  {
+    return false;
+  }
+
+  /**
+   * Builds a 'vectorized' expression processor, that can operate on batches of input values for use in vectorized
+   * query engines.
+   * @param inspector
+   */
+  default <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    throw Exprs.cannotVectorize(this);
   }
 
   /**
@@ -144,10 +170,70 @@ public interface Expr
    * inferring the output type of an expression with {@link #getOutputType}. A null value means that either the binding
    * doesn't exist, or, that the type information is unavailable.
    */
-  interface InputBindingTypes
+  interface InputBindingInspector
   {
+    /**
+     * Get the {@link ExprType} from the backing store for a given identifier (this is likely a column, but could be other
+     * things depending on the backing adapter)
+     */
     @Nullable
     ExprType getType(String name);
+
+    /**
+     * Check if all provided {@link Expr} can infer the output type as {@link ExprType#isNumeric} with a value of true.
+     *
+     * There must be at least one expression with a computable numeric output type for this method to return true.
+     */
+    default boolean areNumeric(List<Expr> args)
+    {
+      boolean numeric = true;
+      for (Expr arg : args) {
+        ExprType argType = arg.getOutputType(this);
+        if (argType == null) {
+          continue;
+        }
+        numeric &= argType.isNumeric();
+      }
+      return numeric;
+    }
+
+    /**
+     * Check if all provided {@link Expr} can infer the output type as {@link ExprType#isNumeric} with a value of true.
+     *
+     * There must be at least one expression with a computable numeric output type for this method to return true.
+     */
+    default boolean areNumeric(Expr... args)
+    {
+      return areNumeric(Arrays.asList(args));
+    }
+
+    /**
+     * Check if every provided {@link Expr} computes {@link Expr#canVectorize(InputBindingInspector)} to a value of true
+     */
+    default boolean canVectorize(List<Expr> args)
+    {
+      boolean canVectorize = true;
+      for (Expr arg : args) {
+        canVectorize &= arg.canVectorize(this);
+      }
+      return canVectorize;
+    }
+
+    /**
+     * Check if every provided {@link Expr} computes {@link Expr#canVectorize(InputBindingInspector)} to a value of true
+     */
+    default boolean canVectorize(Expr... args)
+    {
+      return canVectorize(Arrays.asList(args));
+    }
+  }
+
+  /**
+   * {@link InputBindingInspector} + vectorizations stuff for {@link #buildVectorized}
+   */
+  interface VectorInputBindingInspector extends InputBindingInspector
+  {
+    int getMaxVectorSize();
   }
 
   /**
@@ -163,15 +249,22 @@ public interface Expr
   }
 
   /**
-   * Mechanism to inspect an {@link Expr}, implementing a {@link Visitor} allows visiting all children of an
-   * {@link Expr}
+   * Mechanism to supply batches of input values to a {@link ExprVectorProcessor} for optimized processing. Mirrors
+   * the vectorized column selector interfaces, and includes {@link ExprType} information about all input bindings
+   * which exist
    */
-  interface Visitor
+  interface VectorInputBinding extends VectorInputBindingInspector
   {
-    /**
-     * Provide the {@link Visitor} with an {@link Expr} to inspect
-     */
-    void visit(Expr expr);
+    <T> T[] getObjectVector(String name);
+
+    long[] getLongVector(String name);
+
+    double[] getDoubleVector(String name);
+
+    @Nullable
+    boolean[] getNullVector(String name);
+
+    int getCurrentVectorSize();
   }
 
   /**

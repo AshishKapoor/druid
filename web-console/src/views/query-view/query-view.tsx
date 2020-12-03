@@ -16,8 +16,7 @@
  * limitations under the License.
  */
 
-import { Intent, Switch, Tooltip } from '@blueprintjs/core';
-import axios from 'axios';
+import { Code, Intent, Switch, Tooltip } from '@blueprintjs/core';
 import classNames from 'classnames';
 import { QueryResult, QueryRunner, SqlQuery } from 'druid-query-toolkit';
 import Hjson from 'hjson';
@@ -29,7 +28,7 @@ import { Loader } from '../../components';
 import { QueryPlanDialog } from '../../dialogs';
 import { EditContextDialog } from '../../dialogs/edit-context-dialog/edit-context-dialog';
 import { QueryHistoryDialog } from '../../dialogs/query-history-dialog/query-history-dialog';
-import { AppToaster } from '../../singletons/toaster';
+import { Api, AppToaster } from '../../singletons';
 import {
   BasicQueryExplanation,
   ColumnMetadata,
@@ -225,7 +224,7 @@ export class QueryView extends React.PureComponent<QueryViewProps, QueryViewStat
     });
 
     const queryRunner = new QueryRunner((payload, isSql, cancelToken) => {
-      return axios.post(`/druid/v2${isSql ? '/sql' : ''}`, payload, { cancelToken });
+      return Api.instance.post(`/druid/v2${isSql ? '/sql' : ''}`, payload, { cancelToken });
     });
 
     this.queryManager = new QueryManager({
@@ -295,9 +294,11 @@ export class QueryView extends React.PureComponent<QueryViewProps, QueryViewStat
   }
 
   componentDidMount(): void {
+    const { liveQueryMode, queryString } = this.state;
+
     this.metadataQueryManager.runQuery(null);
 
-    if (this.state.liveQueryMode !== 'off') {
+    if (liveQueryMode !== 'off' && queryString) {
       this.handleRun();
     }
   }
@@ -424,9 +425,9 @@ export class QueryView extends React.PureComponent<QueryViewProps, QueryViewStat
         hoverOpenDelay={800}
       >
         <Switch
-          className="smart-query-limit"
+          className="auto-limit"
           checked={Boolean(wrapQueryLimit)}
-          label="Smart query limit"
+          label="Auto limit"
           onChange={() => this.handleWrapQueryLimitChange(wrapQueryLimit ? undefined : 100)}
         />
       </Tooltip>
@@ -457,6 +458,7 @@ export class QueryView extends React.PureComponent<QueryViewProps, QueryViewStat
       }
     }
 
+    const someQueryResult = queryResultState.getSomeData();
     const runeMode = QueryView.isJsonLike(queryString);
     return (
       <SplitterLayout
@@ -479,7 +481,7 @@ export class QueryView extends React.PureComponent<QueryViewProps, QueryViewStat
             runeMode={runeMode}
             columnMetadata={columnMetadataState.data}
           />
-          <div className="control-bar">
+          <div className="query-control-bar">
             <RunButton
               onEditContext={() => this.setState({ editContextDialogOpen: true })}
               runeMode={runeMode}
@@ -499,10 +501,10 @@ export class QueryView extends React.PureComponent<QueryViewProps, QueryViewStat
           </div>
         </div>
         <div className="output-pane">
-          {queryResult && (
+          {someQueryResult && (
             <QueryOutput
               runeMode={runeMode}
-              queryResult={queryResult}
+              queryResult={someQueryResult}
               onQueryChange={this.handleQueryChange}
             />
           )}
@@ -512,6 +514,8 @@ export class QueryView extends React.PureComponent<QueryViewProps, QueryViewStat
               moveCursorTo={position => {
                 this.moveToPosition(position);
               }}
+              queryString={queryString}
+              onQueryStringChange={this.handleQueryStringChange}
             />
           )}
           {queryResultState.loading && (
@@ -521,6 +525,13 @@ export class QueryView extends React.PureComponent<QueryViewProps, QueryViewStat
                 this.queryManager.cancelCurrent();
               }}
             />
+          )}
+          {queryResultState.isInit() && (
+            <div className="init-state">
+              <p>
+                Enter a query and click <Code>Run</Code>
+              </p>
+            </div>
           )}
         </div>
       </SplitterLayout>

@@ -20,6 +20,8 @@
 package org.apache.druid.math.expr;
 
 import org.apache.druid.java.util.common.guava.Comparators;
+import org.apache.druid.math.expr.vector.ExprVectorProcessor;
+import org.apache.druid.math.expr.vector.VectorComparisonProcessors;
 
 import javax.annotation.Nullable;
 import java.util.Objects;
@@ -60,13 +62,25 @@ class BinLtExpr extends BinaryEvalOpExprBase
 
   @Nullable
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    ExprType implicitCast = super.getOutputType(inputTypes);
+    ExprType implicitCast = super.getOutputType(inspector);
     if (ExprType.STRING.equals(implicitCast)) {
       return ExprType.LONG;
     }
     return implicitCast;
+  }
+
+  @Override
+  public boolean canVectorize(InputBindingInspector inspector)
+  {
+    return inspector.areNumeric(left, right) && inspector.canVectorize(left, right);
+  }
+
+  @Override
+  public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    return VectorComparisonProcessors.lessThan(inspector, left, right);
   }
 }
 
@@ -104,13 +118,25 @@ class BinLeqExpr extends BinaryEvalOpExprBase
 
   @Nullable
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    ExprType implicitCast = super.getOutputType(inputTypes);
+    ExprType implicitCast = super.getOutputType(inspector);
     if (ExprType.STRING.equals(implicitCast)) {
       return ExprType.LONG;
     }
     return implicitCast;
+  }
+
+  @Override
+  public boolean canVectorize(InputBindingInspector inspector)
+  {
+    return inspector.areNumeric(left, right) && inspector.canVectorize(left, right);
+  }
+
+  @Override
+  public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    return VectorComparisonProcessors.lessThanOrEqual(inspector, left, right);
   }
 }
 
@@ -148,13 +174,24 @@ class BinGtExpr extends BinaryEvalOpExprBase
 
   @Nullable
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    ExprType implicitCast = super.getOutputType(inputTypes);
+    ExprType implicitCast = super.getOutputType(inspector);
     if (ExprType.STRING.equals(implicitCast)) {
       return ExprType.LONG;
     }
     return implicitCast;
+  }
+  @Override
+  public boolean canVectorize(InputBindingInspector inspector)
+  {
+    return inspector.areNumeric(left, right) && inspector.canVectorize(left, right);
+  }
+
+  @Override
+  public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    return VectorComparisonProcessors.greaterThan(inspector, left, right);
   }
 }
 
@@ -192,13 +229,25 @@ class BinGeqExpr extends BinaryEvalOpExprBase
 
   @Nullable
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    ExprType implicitCast = super.getOutputType(inputTypes);
+    ExprType implicitCast = super.getOutputType(inspector);
     if (ExprType.STRING.equals(implicitCast)) {
       return ExprType.LONG;
     }
     return implicitCast;
+  }
+
+  @Override
+  public boolean canVectorize(InputBindingInspector inspector)
+  {
+    return inspector.areNumeric(left, right) && inspector.canVectorize(left, right);
+  }
+
+  @Override
+  public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    return VectorComparisonProcessors.greaterThanOrEqual(inspector, left, right);
   }
 }
 
@@ -235,13 +284,25 @@ class BinEqExpr extends BinaryEvalOpExprBase
 
   @Nullable
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    ExprType implicitCast = super.getOutputType(inputTypes);
+    ExprType implicitCast = super.getOutputType(inspector);
     if (ExprType.STRING.equals(implicitCast)) {
       return ExprType.LONG;
     }
     return implicitCast;
+  }
+
+  @Override
+  public boolean canVectorize(InputBindingInspector inspector)
+  {
+    return inspector.areNumeric(left, right) && inspector.canVectorize(left, right);
+  }
+
+  @Override
+  public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    return VectorComparisonProcessors.equal(inspector, left, right);
   }
 }
 
@@ -278,13 +339,25 @@ class BinNeqExpr extends BinaryEvalOpExprBase
 
   @Nullable
   @Override
-  public ExprType getOutputType(InputBindingTypes inputTypes)
+  public ExprType getOutputType(InputBindingInspector inspector)
   {
-    ExprType implicitCast = super.getOutputType(inputTypes);
+    ExprType implicitCast = super.getOutputType(inspector);
     if (ExprType.STRING.equals(implicitCast)) {
       return ExprType.LONG;
     }
     return implicitCast;
+  }
+
+  @Override
+  public boolean canVectorize(InputBindingInspector inspector)
+  {
+    return inspector.areNumeric(left, right) && inspector.canVectorize(left, right);
+  }
+
+  @Override
+  public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+  {
+    return VectorComparisonProcessors.notEqual(inspector, left, right);
   }
 }
 

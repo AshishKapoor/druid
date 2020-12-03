@@ -26,6 +26,9 @@ import org.apache.druid.math.expr.Expr;
 import org.apache.druid.math.expr.ExprEval;
 import org.apache.druid.math.expr.ExprMacroTable;
 import org.apache.druid.math.expr.ExprType;
+import org.apache.druid.math.expr.vector.CastToTypeVectorProcessor;
+import org.apache.druid.math.expr.vector.ExprVectorProcessor;
+import org.apache.druid.math.expr.vector.LongOutLongInFunctionVectorProcessor;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -115,9 +118,34 @@ public class TimestampFloorExprMacro implements ExprMacroTable.ExprMacro
 
     @Nullable
     @Override
-    public ExprType getOutputType(InputBindingTypes inputTypes)
+    public ExprType getOutputType(InputBindingInspector inspector)
     {
       return ExprType.LONG;
+    }
+
+    @Override
+    public boolean canVectorize(InputBindingInspector inspector)
+    {
+      return args.get(0).canVectorize(inspector);
+    }
+
+    @Override
+    public <T> ExprVectorProcessor<T> buildVectorized(VectorInputBindingInspector inspector)
+    {
+      ExprVectorProcessor<?> processor;
+      processor = new LongOutLongInFunctionVectorProcessor(
+          CastToTypeVectorProcessor.cast(args.get(0).buildVectorized(inspector), ExprType.LONG),
+          inspector.getMaxVectorSize()
+      )
+      {
+        @Override
+        public long apply(long input)
+        {
+          return granularity.bucketStart(DateTimes.utc(input)).getMillis();
+        }
+      };
+
+      return (ExprVectorProcessor<T>) processor;
     }
 
     @Override
@@ -167,7 +195,7 @@ public class TimestampFloorExprMacro implements ExprMacroTable.ExprMacro
 
     @Nullable
     @Override
-    public ExprType getOutputType(InputBindingTypes inputTypes)
+    public ExprType getOutputType(InputBindingInspector inspector)
     {
       return ExprType.LONG;
     }
